@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"runtime/trace"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -47,10 +49,20 @@ func main() {
 
 	start := time.Now()
 
-	_, err = pkg.Parse(reader)
+	result, err := pkg.Parse(reader)
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Station < result[j].Station
+	})
+
+	var stringsBuilder strings.Builder
+	for _, i := range result {
+		stringsBuilder.WriteString(fmt.Sprintf("%s=%.1f/%.1f/%.1f, ", i.Station, i.Min, i.Mean, i.Max))
+	}
+	fmt.Println(stringsBuilder.String()[:stringsBuilder.Len()-2])
 
 	fmt.Printf("elapsed: %s\n", time.Since(start).String())
 

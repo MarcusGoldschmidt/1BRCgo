@@ -10,7 +10,6 @@ import (
 	"log"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 )
 
@@ -37,8 +36,7 @@ func Parse(reader *bufio.Reader) ([]*StationMetrics, error) {
 		wg.Add(1)
 		go func() {
 			for msg := range valueChannel {
-				values := parseChunk(msg)
-				aggChannel <- aggregateFromMsg(values)
+				aggChannel <- parseChunk(msg)
 			}
 			wg.Done()
 		}()
@@ -58,32 +56,43 @@ func Parse(reader *bufio.Reader) ([]*StationMetrics, error) {
 	return bucket.GetMetrics(), nil
 }
 
-func parseChunk(chunk []byte) []*valueMessage {
-	lines := bytes.Split(chunk, []byte{'\n'})
+func parseChunk(chunk []byte) map[string]*metricsAggregate {
+	var station string
+	start := 0
 
-	toSend := make([]*valueMessage, 0, len(lines))
+	localMetricsAggregate := map[string]*metricsAggregate{}
 
-	for _, lineByte := range lines {
-		line := string(lineByte)
+	for i := 0; i < len(chunk); i++ {
+		char := chunk[i]
+		switch char {
+		case ';':
+			station = string(chunk[start:i])
+			start = i + 1
+		case '\n':
+			number := string(chunk[start:i])
+			start = i + 1
 
-		splitValues := strings.Split(line, ";")
+			value, err := strconv.ParseFloat(number, 32)
+			if err != nil {
+				log.Fatal(err)
+			}
 
-		if len(splitValues) != 2 {
-			continue
+			value32 := float32(value)
+
+			aggregate, ok := localMetricsAggregate[station]
+			if !ok {
+				aggregate = newMetricsAggregate()
+				localMetricsAggregate[station] = aggregate
+			}
+
+			aggregate.min = min(aggregate.min, value32)
+			aggregate.max = max(aggregate.max, value32)
+			aggregate.sum += value32
+			aggregate.count++
 		}
-
-		value, err := strconv.ParseFloat(splitValues[1], 32)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		toSend = append(toSend, &valueMessage{
-			station: splitValues[0],
-			value:   float32(value),
-		})
 	}
 
-	return toSend
+	return localMetricsAggregate
 }
 
 func readChunk(reader *bufio.Reader, chunkChan chan []byte, bufferSize ...unit.Size) {
